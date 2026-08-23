@@ -1,0 +1,5 @@
+soco
+spotipy
+requests
+Pillow
+urllib3

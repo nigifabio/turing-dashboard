@@ -1,0 +1,19 @@
+[Unit]
+Description=Sonos/Jellyfin now-playing + Proxmox/bandwidth dashboard (Turing Smart Screen)
+Requires=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME_HERE
+WorkingDirectory=/home/YOUR_USERNAME_HERE/turing-smart-screen-python
+ExecStart=/home/YOUR_USERNAME_HERE/turing-smart-screen-python/venv/bin/python sonos_dashboard.py
+Restart=always
+RestartSec=5
+
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

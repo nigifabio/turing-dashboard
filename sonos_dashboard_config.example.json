@@ -1,0 +1,24 @@
+{
+  "proxmox": {
+    "host": "192.168.1.10",
+    "node": "pve",
+    "token_id": "root@pam!mytoken",
+    "token_secret": "00000000-0000-0000-0000-000000000000"
+  },
+  "jellyfin": {
+    "host": "192.168.1.20",
+    "port": 8096,
+    "api_key": "your-jellyfin-api-key"
+  },
+  "prometheus": {
+    "host": "192.168.1.30",
+    "port": 9090,
+    "host_instance": "192.168.1.10:9100",
+    "host_device": "eth0"
+  },
+  "spotify": {
+    "client_id": "your-spotify-client-id",
+    "client_secret": "your-spotify-client-secret",
+    "redirect_uri": "http://127.0.0.1:8888/"
+  }
+}
