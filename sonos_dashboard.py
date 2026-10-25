@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # Multi-source "Now Playing" dashboard for the Turing Smart Screen.
-# Priority: Sonos (music) > Jellyfin (movie/show) > idle screens, cycling
-# between Proxmox host stats and a Prometheus bandwidth graph.
+# Priority: Sonos (music, alternating with the house sensors and weather when Home
+# Assistant is configured) > Jellyfin (movie/show) > idle screens, cycling
+# between Proxmox host stats, a Prometheus bandwidth graph, the house sensors and
+# the weather forecast (the last two from Home Assistant, see home_screens.py).
 
 import io
 import json
@@ -33,6 +35,7 @@ sys.path.insert(0, str(REPO_DIR))
 
 from library.lcd.lcd_comm_rev_a import LcdCommRevA, Orientation  # noqa: E402
 from library.log import logger  # noqa: E402
+from home_screens import HomeAssistant, configure as configure_home_screens, render_home_sensors, render_weather  # noqa: E402
 
 CONFIG_PATH = REPO_DIR / "sonos_dashboard_config.json"
 ART_CACHE_DIR = REPO_DIR / "art_cache"
@@ -71,7 +74,8 @@ PVE_HEADERS = {"Authorization": f"PVEAPIToken={PVE['token_id']}={PVE['token_secr
 
 JF = config["jellyfin"]
 JELLYFIN_BASE = f"http://{JF['host']}:{JF['port']}"
-JELLYFIN_HEADERS = {"X-Emby-Token": JF["api_key"]}
+# Jellyfin 12 dropped X-Emby-Token; only the Authorization header is accepted.
+JELLYFIN_HEADERS = {"Authorization": f'MediaBrowser Token="{JF["api_key"]}"'}
 
 PROM = config["prometheus"]
 PROM_BASE = f"http://{PROM['host']}:{PROM['port']}"
@@ -82,6 +86,12 @@ JELLYFIN_POLL_INTERVAL_S = 5
 BANDWIDTH_POLL_INTERVAL_S = 30
 BANDWIDTH_WINDOW_S = 30 * 60
 IDLE_SCREEN_CYCLE_S = 8
+HA_STATES_POLL_INTERVAL_S = 30
+HA_FORECAST_POLL_INTERVAL_S = 15 * 60
+HA = None
+if "homeassistant" in config:  # optional: house sensors + weather screens
+    HA = HomeAssistant(config["homeassistant"]["url"], config["homeassistant"]["token"])
+    configure_home_screens(config["homeassistant"])
 
 SP = config["spotify"]
 spotify_client = Spotify(auth_manager=SpotifyOAuth(
@@ -579,14 +589,27 @@ def render_proxmox_stats(width, height, stats):
     return frame
 
 
+COM_PORT = "/dev/ttyACM0"
+
+
+def device_id():
+    """Identity of the current USB screen node; changes when the screen re-enumerates."""
+    try:
+        st = os.stat(COM_PORT)
+        return (st.st_rdev, st.st_ctime_ns)
+    except FileNotFoundError:
+        return None
+
+
 def main():
-    lcd_comm = LcdCommRevA(com_port="/dev/ttyACM0", display_width=320, display_height=480)
+    lcd_comm = LcdCommRevA(com_port=COM_PORT, display_width=320, display_height=480)
     lcd_comm.Reset()
     lcd_comm.InitializeComm()
     lcd_comm.SetBrightness(level=20)
     lcd_comm.SetOrientation(orientation=Orientation.LANDSCAPE)
 
     width, height = lcd_comm.get_width(), lcd_comm.get_height()
+    screen_id = device_id()
 
     sonos = SonosSource()
 
@@ -596,16 +619,42 @@ def main():
     last_jellyfin_poll = 0.0
     bandwidth_cache = None
     last_bandwidth_poll = 0.0
+    ha_states = None
+    last_ha_poll = 0.0
+    ha_daily = None
+    last_forecast_poll = 0.0
 
     while not stop:
         loop_start = time.perf_counter()
         now = time.time()
 
+        if HA and now - last_ha_poll > HA_STATES_POLL_INTERVAL_S:
+            last_ha_poll = now
+            try:
+                ha_states = HA.states()
+            except Exception as e:
+                logger.warning(f"Home Assistant states failed: {e}")
+                ha_states = None
+        if HA and now - last_forecast_poll > HA_FORECAST_POLL_INTERVAL_S:
+            last_forecast_poll = now
+            try:
+                ha_daily = HA.forecast("daily")
+            except Exception as e:
+                logger.warning(f"Home Assistant forecast failed: {e}")
+
         np = sonos.get_now_playing()
         if np:
-            frame = render_now_playing(width, height, np)
+            # while music plays: now playing for two slots, then the house sensors and the weather
+            rotation = ["music", "music"] + (["sensors", "weather"] if HA else [])
+            slot = rotation[int(now // IDLE_SCREEN_CYCLE_S) % len(rotation)]
+            if slot == "sensors":
+                frame = render_home_sensors(width, height, ha_states, FONT_REGULAR, FONT_BOLD)
+            elif slot == "weather":
+                frame = render_weather(width, height, ha_states, ha_daily, FONT_REGULAR, FONT_BOLD)
+            else:
+                frame = render_now_playing(width, height, np)
         else:
-            if jellyfin_cache is None or now - last_jellyfin_poll > JELLYFIN_POLL_INTERVAL_S:
+            if now - last_jellyfin_poll > JELLYFIN_POLL_INTERVAL_S:
                 jellyfin_cache = get_jellyfin_now_playing()
                 last_jellyfin_poll = now
 
@@ -619,11 +668,22 @@ def main():
                     bandwidth_cache = get_bandwidth_history()
                     last_bandwidth_poll = now
 
-                if int(now // IDLE_SCREEN_CYCLE_S) % 2 == 0:
+                screens = ["proxmox", "bandwidth"] + (["sensors", "weather"] if HA else [])
+                screen = screens[int(now // IDLE_SCREEN_CYCLE_S) % len(screens)]
+                if screen == "proxmox":
                     frame = render_proxmox_stats(width, height, proxmox_cache)
-                else:
+                elif screen == "bandwidth":
                     frame = render_bandwidth_graph(width, height, bandwidth_cache)
+                elif screen == "sensors":
+                    frame = render_home_sensors(width, height, ha_states, FONT_REGULAR, FONT_BOLD)
+                else:
+                    frame = render_weather(width, height, ha_states, ha_daily, FONT_REGULAR, FONT_BOLD)
 
+        # After a USB reset (e.g. undervoltage) the screen comes back in its default
+        # portrait/brightness state, so exit and let systemd re-initialise it.
+        if device_id() != screen_id:
+            logger.warning("Screen re-enumerated on USB, exiting so systemd restarts the dashboard")
+            sys.exit(1)
         lcd_comm.DisplayPILImage(frame)
 
         elapsed = time.perf_counter() - loop_start

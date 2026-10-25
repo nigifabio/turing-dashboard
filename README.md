@@ -4,9 +4,13 @@ A "now playing" + homelab-stats dashboard for a [Turing Smart Screen](https://gi
 
 Priority order, checked every ~2 seconds:
 
-1. **Sonos** — if any speaker on the LAN is playing, shows its album art, track/artist/album, room (+ group, if speakers are grouped), volume, and "up next".
+1. **Sonos** — if any speaker on the LAN is playing, shows its album art, track/artist/album, room (+ group, if speakers are grouped), volume, and "up next". With Home Assistant configured, the now-playing screen alternates with the house sensors and weather screens (16 s music, 8 s each of the others).
 2. **Jellyfin** — if nothing's playing on Sonos but a movie/episode is actively playing on a Jellyfin server, shows poster art, title, and progress.
-3. **Idle** — cycles every 8s between Proxmox host stats (CPU/RAM/disk/uptime) and a bandwidth graph (via Prometheus + node_exporter).
+3. **Idle** — cycles every 8s between Proxmox host stats (CPU/RAM/disk/uptime), a bandwidth graph (via Prometheus + node_exporter) and, if Home Assistant is configured, the house sensors and the weather with the week's forecast.
+
+| House sensors | Weather |
+|---|---|
+| ![House sensors screen](docs/screen-sensors.png) | ![Weather screen](docs/screen-weather.png) |
 
 ## Hardware / prerequisites
 
@@ -30,6 +34,12 @@ Priority order, checked every ~2 seconds:
 - **Jellyfin**: an API key (Jellyfin admin dashboard → API Keys) and the server's host/port.
 - **Proxmox**: a read-only API token (Datacenter → Permissions → API Tokens) and the node name.
 - **Prometheus**: only needs a URL — assumes `node_exporter` metrics are already being scraped for the host you want a bandwidth graph for. You'll need to fill in the exact `instance` and `device` labels for that host's physical NIC (check `curl http://<prometheus>:9090/api/v1/query?query=node_network_receive_bytes_total` to find them — don't guess, there are usually multiple scrape targets and virtual interfaces in the same Prometheus that would double-count or show the wrong thing).
+- **Home Assistant** (optional): adds the two screens above (`home_screens.py`). Create a long-lived access token (your profile → Security → Long-lived access tokens) and fill in the `homeassistant` block:
+  - `url`, `token` — your Home Assistant address and the token.
+  - `weather` — a weather entity with a daily forecast (the default Met.no one is `weather.forecast_home`); `location` is just the title.
+  - `sensors` — up to 4 big tiles as `[label, entity_id, kind]`, where kind is `temp`, `humidity` (orange outside 40–60 %), `pm25` (green/yellow/orange/red by air quality) or `climate` (room and target temperature of a thermostat).
+  - `devices` — up to 6 status rows as `[label, entity_id]`: lights (dot in the light's colour, effect name if one runs), fans and purifiers (preset mode), humidifiers, and any sensor (filter levels show green/red, "removed"/"empty" states red).
+  - Entities that don't exist or are unavailable are simply skipped. Sensors are read every 30 s, the forecast every 15 min. Leave the whole block out and the dashboard behaves as before.
 - **Spotify** (optional, only used as a fallback): Sonos's own API can tell you what's queued up next *only* for classic Sonos-queue playback (an album/playlist browsed from the Sonos app). If you listen via **Spotify Connect through Sonos** (the common case), Sonos's queue is empty — Spotify's servers control it, not Sonos — so this script falls back to Spotify's own Web API for "up next" in that case. To enable it:
   1. Create an app at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard), enable the Web API, and add `http://127.0.0.1:8888/` as a Redirect URI (must match **exactly** what you put in the config — Spotify rejects any mismatch, including a missing/extra trailing slash or path).
   2. Fill in `client_id`/`client_secret`/`redirect_uri` in the config.
@@ -53,6 +63,8 @@ sudo systemctl enable --now sonos-dashboard.service
 ```
 
 ## Known limitations
+
+- The screens use the Roboto font from the upstream repo, which has no emoji or arrow glyphs, so weather icons are drawn rather than typed.
 
 - Sonos "up next" (without the Spotify fallback) doesn't account for shuffle order, and doesn't apply to radio/non-queue streams.
 - Sonos device discovery can be inconsistent run-to-run on some networks — the code re-discovers every 60s to self-heal, but a room might briefly not appear.

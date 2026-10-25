@@ -20,5 +20,59 @@
     "client_id": "your-spotify-client-id",
     "client_secret": "your-spotify-client-secret",
     "redirect_uri": "http://127.0.0.1:8888/"
+  },
+  "homeassistant": {
+    "url": "http://192.168.1.40:8123",
+    "token": "your-long-lived-access-token",
+    "weather": "weather.forecast_home",
+    "location": "My town",
+    "sensors": [
+      [
+        "Temperature",
+        "sensor.living_room_temperature",
+        "temp"
+      ],
+      [
+        "Humidity",
+        "sensor.living_room_humidity",
+        "humidity"
+      ],
+      [
+        "PM2.5",
+        "sensor.air_purifier_pm25",
+        "pm25"
+      ],
+      [
+        "Radiator",
+        "climate.living_room",
+        "climate"
+      ]
+    ],
+    "devices": [
+      [
+        "Desk lamp",
+        "light.desk_lamp"
+      ],
+      [
+        "LED strip",
+        "light.led_strip"
+      ],
+      [
+        "Purifier",
+        "fan.air_purifier"
+      ],
+      [
+        "Humidifier",
+        "humidifier.humidifier"
+      ],
+      [
+        "Filter",
+        "sensor.air_purifier_filter_life"
+      ],
+      [
+        "Water tank",
+        "sensor.humidifier_water_tank"
+      ]
+    ]
   }
 }
